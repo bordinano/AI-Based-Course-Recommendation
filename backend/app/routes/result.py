@@ -5,6 +5,9 @@ from pydantic import BaseModel, EmailStr
 from app.database import get_db
 from app.schemas.result import AssessmentResultResponse
 from app.services.recommendation import get_recommendation_results
+from app.services.email import send_results_email as send_email_service
+from app.models.assessment_attempt import AssessmentAttempt
+from app.models.student import Student
 
 
 router = APIRouter(
@@ -61,15 +64,21 @@ def send_results_email(
             detail="Results not found for this attempt"
         )
 
-    # TODO: Implement actual email sending (e.g., via SendGrid, SMTP, etc.)
-    # For now, we'll log and return success
-    import logging
-    logging.info(f"Sending results for attempt {attempt_id} to {request.email}")
+    # Get student name for personalized email
+    attempt = db.query(AssessmentAttempt).filter(AssessmentAttempt.id == attempt_id).first()
+    student_name = "Student"
+    if attempt:
+        student = db.query(Student).filter(Student.id == attempt.student_id).first()
+        if student:
+            student_name = student.full_name
 
-    # Placeholder for email sending logic
-    # In production, integrate with an email service like:
-    # - SendGrid: sendgrid.SendGridAPIClient
-    # - AWS SES: boto3.client('ses')
-    # - SMTP: smtplib.SMTP
+    # Send email
+    success = send_email_service(request.email, student_name, results)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send email. Please check email configuration."
+        )
 
     return {"message": "Results sent successfully", "email": request.email}

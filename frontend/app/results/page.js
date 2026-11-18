@@ -1,10 +1,12 @@
 "use client";
 
-import { useContext, useState, useEffect } from "react";
+import { useContext, useState, useEffect, useRef } from "react";
 import { StudentContext } from "@/context/StudentContext";
 import { useRouter } from "next/navigation";
 import { getResults } from "@/services/api";
 import ThinkerLogo from "@/components/ThinkerLogo";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export default function ResultsPage() {
   const { student, attemptId, clearData } = useContext(StudentContext);
@@ -15,6 +17,16 @@ export default function ResultsPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [schoolFilter, setSchoolFilter] = useState("All"); // All, Public, Private
 
+  // Email sending states
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailInput, setEmailInput] = useState(student.email || "");
+  const [emailStatus, setEmailStatus] = useState(null); // null, "success", "error"
+  const [emailMessage, setEmailMessage] = useState("");
+
+  // Loading animation refs for minimum 10 second display
+  const loadingStartTime = useRef(Date.now());
+  const [showLoading, setShowLoading] = useState(true);
+
   // Fetch results on mount
   useEffect(() => {
     if (!student.studentId || !attemptId) {
@@ -22,8 +34,11 @@ export default function ResultsPage() {
       return;
     }
 
+    loadingStartTime.current = Date.now();
+    setShowLoading(true);
+    setIsLoading(true);
+
     const fetchResults = async () => {
-      setIsLoading(true);
       try {
         const data = await getResults(attemptId, schoolFilter === "All" ? null : schoolFilter);
         setResults(data);
@@ -31,6 +46,12 @@ export default function ResultsPage() {
         setErrorMessage(error.message || "Failed to load results. Please try again.");
       } finally {
         setIsLoading(false);
+        // Ensure minimum 10 second loading display
+        const elapsed = Date.now() - loadingStartTime.current;
+        const remainingTime = Math.max(0, 10000 - elapsed);
+        setTimeout(() => {
+          setShowLoading(false);
+        }, remainingTime);
       }
     };
 
@@ -48,12 +69,103 @@ export default function ResultsPage() {
     router.push("/student");
   };
 
-  if (isLoading) {
+  const handleSendEmail = async () => {
+    if (!emailInput.trim()) {
+      setEmailStatus("error");
+      setEmailMessage("Please enter an email address.");
+      return;
+    }
+
+    // Simple email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailInput.trim())) {
+      setEmailStatus("error");
+      setEmailMessage("Please enter a valid email address.");
+      return;
+    }
+
+    setIsSendingEmail(true);
+    setEmailStatus(null);
+    setEmailMessage("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/assessment/attempts/${attemptId}/send-results`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: emailInput.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to send email.");
+      }
+
+      setEmailStatus("success");
+      setEmailMessage("Results sent successfully to " + emailInput.trim() + "!");
+    } catch (error) {
+      setEmailStatus("error");
+      setEmailMessage(error.message || "Failed to send email. Please try again.");
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  // Show loading animation for minimum 10 seconds
+  if (showLoading) {
     return (
       <main className="min-h-screen bg-linear-to-r from-[#cdffd8] to-[#94b9ff] flex items-center justify-center py-16">
         <div className="text-center">
           <ThinkerLogo />
-          <p className="mt-4 text-lg text-gray-600">Generating your recommendations...</p>
+          <div className="mt-8 flex flex-col items-center gap-4">
+            {/* Animated spinner */}
+            <div className="relative w-20 h-20">
+              <svg className="w-full h-full text-[#283d7a]" viewBox="0 0 80 80">
+                <circle
+                  cx="40"
+                  cy="40"
+                  r="32"
+                  fill="none"
+                  stroke="#e5e7eb"
+                  strokeWidth="6"
+                />
+                <circle
+                  cx="40"
+                  cy="40"
+                  r="32"
+                  fill="none"
+                  stroke="#283d7a"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                  strokeDasharray="201"
+                  strokeDashoffset="60"
+                  className="animate-spin"
+                  style={{
+                    animation: "spin 1.5s linear infinite, dash 1.5s ease-in-out infinite",
+                  }}
+                />
+                <style jsx>{`
+                  @keyframes spin {
+                    to { transform: rotate(360deg); }
+                  }
+                  @keyframes dash {
+                    0% { stroke-dashoffset: 60; }
+                    50% { stroke-dashoffset: 140; }
+                    100% { stroke-dashoffset: 60; }
+                  }
+                `}</style>
+              </svg>
+            </div>
+            <p className="text-lg text-gray-600 font-medium">Generating your recommendations...</p>
+            <p className="text-sm text-gray-400">This may take up to 10 seconds while our AI analyzes your responses</p>
+            {/* Progress bar */}
+            <div className="w-64 h-2 bg-gray-200 rounded-full overflow-hidden mt-4">
+              <div
+                className="h-full bg-gradient-to-r from-[#283d7a] to-[#00a8e8] rounded-full animate-pulse"
+                style={{ width: "100%" }}
+              />
+            </div>
+          </div>
         </div>
       </main>
     );
@@ -265,12 +377,65 @@ export default function ResultsPage() {
         </div>
 
         {/* Disclaimer */}
-        <div className="bg-yellow-50 border-l-4 border-yellow-500 p-5 rounded-lg">
+        <div className="bg-yellow-50 border-l-4 border-yellow-500 p-5 rounded-lg mb-8">
           <p className="text-sm text-gray-700">
             <strong>Note:</strong> The recommended schools are limited to educational institutions within Muntinlupa
             City that offer the recommended program. Students are encouraged to verify admission requirements and
             program availability directly with the institution.
           </p>
+        </div>
+
+        {/* Send Results Email Section */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 mb-8">
+          <h3 className="text-lg font-bold text-[#111827] mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#283d7a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            Send Results to Email
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Enter your email address to receive a copy of these recommendations.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 max-w-md">
+            <input
+              type="email"
+              className="flex-1 rounded-full border border-gray-400 bg-transparent px-5 py-3 text-sm outline-none transition focus:border-[#283d7a]"
+              placeholder="Enter your email address"
+              value={emailInput}
+              onChange={(e) => {
+                setEmailInput(e.target.value);
+                setEmailStatus(null);
+                setEmailMessage("");
+              }}
+              disabled={isSendingEmail}
+            />
+            <button
+              onClick={handleSendEmail}
+              disabled={isSendingEmail || !emailInput.trim()}
+              className={`rounded-full px-6 py-3 text-sm font-bold text-white transition whitespace-nowrap ${
+                isSendingEmail
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-[#283d7a] hover:bg-[#1f315f]"
+              }`}
+            >
+              {isSendingEmail ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Sending...
+                </span>
+              ) : (
+                "SEND RESULTS"
+              )}
+            </button>
+          </div>
+          {emailStatus && (
+            <p className={`mt-3 text-sm font-medium ${emailStatus === "success" ? "text-green-600" : "text-red-600"}`}>
+              {emailMessage}
+            </p>
+          )}
         </div>
 
         {/* Action Buttons */}
