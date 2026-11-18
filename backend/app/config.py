@@ -8,6 +8,17 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5434
 
+    # Email settings
+    EMAIL_ENABLED: bool = False
+    EMAIL_PROVIDER: str = "smtp"  # "smtp" | "sendgrid"
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@munrecs.local"
+    SENDGRID_API_KEY: str = ""
+    SENDGRID_FROM: str = "noreply@munrecs.local"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
